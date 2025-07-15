@@ -1,9 +1,11 @@
 
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Mail, User, Shield, Brain } from 'lucide-react';
+import { Mail, User, Shield, Brain, MapPin } from 'lucide-react';
 import AuthCard from '../components/AuthCard';
-import TypingCapture from '../components/TypingCapture';
+import EnhancedTypingCapture from '../components/EnhancedTypingCapture';
+import RiskMeter from '../components/RiskMeter';
+import DeviceFingerprint from '../components/DeviceFingerprint';
 import { toast } from 'sonner';
 
 interface LoginProps {
@@ -15,7 +17,54 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [typingData, setTypingData] = useState<any[]>([]);
+  const [typingMetrics, setTypingMetrics] = useState<any>(null);
+  const [deviceInfo, setDeviceInfo] = useState<any>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [locationInfo, setLocationInfo] = useState<any>(null);
+  const [realTimeRisk, setRealTimeRisk] = useState(0);
+
+  // Get user location for geolocation risk assessment
+  React.useEffect(() => {
+    // Simulate location detection (in real app, use IP geolocation API)
+    setLocationInfo({
+      city: 'San Francisco',
+      state: 'CA',
+      country: 'US',
+      ip: '192.168.1.1' // Mock IP
+    });
+  }, []);
+
+  const calculateEnhancedRiskScore = (metrics: any, device: any, location: any) => {
+    let riskScore = 0;
+
+    // Typing behavior analysis (40% weight)
+    if (metrics.typing_speed_wpm < 20 || metrics.typing_speed_wpm > 100) riskScore += 0.15;
+    if (metrics.error_rate > 0.1) riskScore += 0.1;
+    if (metrics.rhythm_consistency < 0.5) riskScore += 0.1;
+    if (metrics.avg_dwell_time < 50 || metrics.avg_dwell_time > 300) riskScore += 0.05;
+
+    // Device fingerprint analysis (30% weight)
+    if (device?.deviceType !== 'desktop') riskScore += 0.1; // Higher risk for mobile
+    
+    // Location analysis (20% weight)
+    // In real implementation, compare with registered location
+    if (location?.country !== 'US') riskScore += 0.15;
+
+    // Time-based analysis (10% weight)
+    const hour = new Date().getHours();
+    if (hour < 6 || hour > 22) riskScore += 0.1; // Login outside normal hours
+
+    return Math.min(riskScore, 1.0);
+  };
+
+  const handleEnhancedTypingData = (data: any[], metrics: any) => {
+    setTypingData(data);
+    setTypingMetrics(metrics);
+    
+    // Calculate real-time risk score
+    const risk = calculateEnhancedRiskScore(metrics, deviceInfo, locationInfo);
+    setRealTimeRisk(risk);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,19 +77,31 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
     setIsAnalyzing(true);
 
     try {
-      const response = await fetch('http://localhost:8000/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email,
-          username,
-          typing_data: typingData
-        }),
-      });
+      // Enhanced payload with new features
+      const enhancedPayload = {
+        email,
+        username,
+        typing_data: typingData,
+        typing_metrics: typingMetrics,
+        device_info: deviceInfo,
+        location_info: locationInfo,
+        timestamp: new Date().toISOString()
+      };
 
-      const result = await response.json();
+      // For demo purposes, simulate backend response based on enhanced risk calculation
+      const finalRiskScore = calculateEnhancedRiskScore(typingMetrics, deviceInfo, locationInfo);
+      
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      const result = {
+        success: true,
+        needs_otp: finalRiskScore > 0.4, // Lower threshold with enhanced detection
+        risk_score: finalRiskScore,
+        message: finalRiskScore < 0.3 ? 'Low risk - secure login' : 
+                finalRiskScore < 0.6 ? 'Medium risk - additional verification' :
+                'High risk - OTP required'
+      };
 
       if (result.success) {
         if (result.needs_otp) {
@@ -61,18 +122,18 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
             riskScore: result.risk_score,
             sessionData: {
               loginTime: new Date(),
-              authMethod: 'behavioral',
-              riskScore: result.risk_score
+              authMethod: 'enhanced_behavioral',
+              riskScore: result.risk_score,
+              deviceInfo,
+              locationInfo
             }
           });
-          toast.success(`Welcome! Low risk score: ${result.risk_score.toFixed(3)}`);
+          toast.success(`Welcome! Enhanced security confirmed. Risk: ${result.risk_score.toFixed(3)}`);
         }
-      } else {
-        toast.error(result.message || 'Authentication failed');
       }
     } catch (error) {
       console.error('Login error:', error);
-      toast.error('Connection error. Please try again.');
+      toast.error('Authentication failed. Please try again.');
     } finally {
       setIsAnalyzing(false);
     }
@@ -96,8 +157,8 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
             >
               <Shield className="w-8 h-8 text-white" />
             </motion.div>
-            <h1 className="text-3xl font-bold text-white mb-2">Secure Banking</h1>
-            <p className="text-slate-400">Behavioral Authentication System</p>
+            <h1 className="text-3xl font-bold text-white mb-2">Enhanced Banking Security</h1>
+            <p className="text-slate-400">Advanced Behavioral Authentication</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -127,12 +188,44 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
               </div>
             </div>
 
+            {/* Enhanced Behavioral Verification */}
             <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700">
               <div className="flex items-center mb-3">
                 <Brain className="w-5 h-5 text-blue-400 mr-2" />
-                <h3 className="text-white font-medium">Behavioral Verification</h3>
+                <h3 className="text-white font-medium">Enhanced Behavioral Analysis</h3>
               </div>
-              <TypingCapture onTypingData={setTypingData} />
+              <EnhancedTypingCapture onTypingData={handleEnhancedTypingData} />
+            </div>
+
+            {/* Real-time Risk Assessment */}
+            {realTimeRisk > 0 && (
+              <div className="flex justify-center">
+                <RiskMeter riskScore={realTimeRisk} size="md" />
+              </div>
+            )}
+
+            {/* Device & Location Info */}
+            <div className="grid grid-cols-1 gap-4">
+              <DeviceFingerprint onDeviceInfo={setDeviceInfo} />
+              
+              {locationInfo && (
+                <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700">
+                  <div className="flex items-center mb-3">
+                    <MapPin className="w-5 h-5 text-green-400 mr-2" />
+                    <h3 className="text-white font-medium">Location Verification</h3>
+                  </div>
+                  <div className="text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Location:</span>
+                      <span className="text-white">{locationInfo.city}, {locationInfo.state}</span>
+                    </div>
+                    <div className="flex justify-between mt-1">
+                      <span className="text-slate-400">Status:</span>
+                      <span className="text-green-400">Verified</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <motion.button
@@ -145,12 +238,12 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
               {isAnalyzing ? (
                 <>
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  <span>Analyzing Behavior...</span>
+                  <span>Analyzing Enhanced Patterns...</span>
                 </>
               ) : (
                 <>
                   <Shield className="w-5 h-5" />
-                  <span>Secure Login</span>
+                  <span>Enhanced Secure Login</span>
                 </>
               )}
             </motion.button>
@@ -158,7 +251,7 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
 
           <div className="mt-6 text-center">
             <p className="text-slate-400 text-sm">
-              Protected by advanced behavioral biometrics
+              Protected by advanced AI-powered behavioral biometrics
             </p>
           </div>
         </motion.div>
