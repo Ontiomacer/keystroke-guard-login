@@ -1,73 +1,156 @@
-# Welcome to your Lovable project
 
-## Project info
+# Behavioral Fraud Detection for Mobile & Internet Banking
 
-**URL**: https://lovable.dev/projects/dab7950a-3194-4613-991d-4335a064b6b4
+A sophisticated full-stack authentication system that prevents impersonated banking registrations using keystroke dynamics and machine learning.
 
-## How can I edit this code?
+## 🚀 Features
 
-There are several ways of editing your application.
+- **Behavioral Authentication**: Keystroke dynamics analysis using OneClassSVM
+- **OTP Fallback System**: Secure email-based verification for high-risk attempts
+- **Real-time Risk Scoring**: ML-powered fraud detection
+- **Beautiful Dashboard**: Risk analytics and login history visualization
+- **Glassmorphism UI**: Modern dark theme with smooth animations
 
-**Use Lovable**
+## 🛠️ Tech Stack
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/dab7950a-3194-4613-991d-4335a064b6b4) and start prompting.
+### Frontend
+- React 18 + TypeScript
+- Vite for fast development
+- Tailwind CSS for styling
+- Framer Motion for animations
+- Recharts for data visualization
+- React Router for navigation
 
-Changes made via Lovable will be committed automatically to this repo.
+### Backend (Setup Required)
+- FastAPI for REST API
+- OneClassSVM for behavioral modeling
+- SMTP for email delivery
+- Joblib for model persistence
 
-**Use your preferred IDE**
+## 🎯 Getting Started
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Frontend Setup (Current)
+The frontend is already configured and running. It includes:
+- Login with keystroke capture
+- OTP verification interface  
+- Security dashboard with analytics
+- Responsive glassmorphism design
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### Backend Setup (Required)
 
-Follow these steps:
+Create a `backend/` directory and implement the following structure:
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```
+backend/
+├── main.py              # FastAPI application
+├── utils/
+│   ├── email.py         # Email and OTP utilities
+│   └── model.py         # ML model functions
+├── models/              # Trained models per user
+├── .env                 # Environment variables
+├── otp_audit.log        # Security logs
+├── requirements.txt     # Python dependencies
+└── train_model.py       # Model training script
 ```
 
-**Edit a file directly in GitHub**
+#### Backend Dependencies
+```bash
+pip install fastapi uvicorn scikit-learn joblib python-dotenv python-multipart
+```
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+#### Environment Variables (.env)
+```env
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+SMTP_EMAIL=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+```
 
-**Use GitHub Codespaces**
+#### FastAPI Endpoints
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+**POST /analyze**
+```json
+{
+  "email": "user@example.com",
+  "username": "testuser",
+  "typing_data": [
+    {"key": "a", "timestamp": 1642000000000, "delay": 150},
+    {"key": "b", "timestamp": 1642000000150, "delay": 120}
+  ]
+}
+```
 
-## What technologies are used for this project?
+Response:
+```json
+{
+  "success": true,
+  "needs_otp": false,
+  "risk_score": 0.123,
+  "message": "Low risk authentication"
+}
+```
 
-This project is built with:
+**POST /verify-otp**
+```json
+{
+  "email": "user@example.com",
+  "otp": "123456"
+}
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## 🔐 Security Features
 
-## How can I deploy this project?
+- **Keystroke Dynamics**: Captures timing patterns between keystrokes
+- **ML Risk Scoring**: OneClassSVM model analyzes behavioral patterns
+- **OTP Fallback**: 6-digit codes with 5-minute expiry
+- **Audit Logging**: All authentication attempts are logged
+- **Rate Limiting**: Prevents brute force attacks
 
-Simply open [Lovable](https://lovable.dev/projects/dab7950a-3194-4613-991d-4335a064b6b4) and click on Share -> Publish.
+## 🎨 UI Features
 
-## Can I connect a custom domain to my Lovable project?
+- **Glassmorphism Design**: Semi-transparent cards with backdrop blur
+- **Dark Theme**: Sophisticated slate color palette
+- **Smooth Animations**: Framer Motion transitions
+- **Responsive Layout**: Mobile-first design approach
+- **Real-time Feedback**: Live typing analysis and risk indicators
 
-Yes, you can!
+## 📊 Dashboard Analytics
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+- Login success rates
+- Authentication method distribution
+- Risk score trends over time
+- Recent activity timeline
+- Security alerts and notifications
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+## 🚨 Risk Assessment
+
+- **Low Risk (< 0.3)**: Direct behavioral authentication
+- **Medium Risk (0.3-0.6)**: Additional verification required
+- **High Risk (> 0.6)**: OTP fallback mandatory
+
+## 🔧 Development
+
+The frontend includes comprehensive error handling, loading states, and user feedback. The typing capture component records keystroke dynamics with precision timing for behavioral analysis.
+
+Key components:
+- `TypingCapture`: Records keystroke patterns
+- `AuthCard`: Glassmorphism authentication container
+- `RiskGraph`: Risk visualization with Recharts
+- `Dashboard`: Security analytics interface
+
+## 📱 Mobile Support
+
+Fully responsive design optimized for mobile banking applications with touch-friendly interfaces and adaptive layouts.
+
+## 🛡️ Production Considerations
+
+- Implement rate limiting on authentication endpoints
+- Use secure session management
+- Enable HTTPS in production
+- Regular model retraining with new behavioral data
+- Comprehensive audit logging
+- Backup and recovery procedures
+
+---
+
+**Note**: This implementation provides the complete frontend interface. The backend FastAPI server needs to be implemented separately following the API specifications above.
