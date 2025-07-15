@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Mail, User, Shield, Brain, MapPin } from 'lucide-react';
+import { Mail, User, Shield, Brain, MapPin, Settings } from 'lucide-react';
 import AuthCard from '../components/AuthCard';
 import EnhancedTypingCapture from '../components/EnhancedTypingCapture';
 import RiskMeter from '../components/RiskMeter';
@@ -22,6 +22,7 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [locationInfo, setLocationInfo] = useState<any>(null);
   const [realTimeRisk, setRealTimeRisk] = useState(0);
+  const [mockMode, setMockMode] = useState(true); // Default to mock mode for testing
 
   // Get user location for geolocation risk assessment
   React.useEffect(() => {
@@ -66,6 +67,42 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
     setRealTimeRisk(risk);
   };
 
+  const callBackendAPI = async (endpoint: string, payload: any) => {
+    const API_BASE = 'http://localhost:8000';
+    
+    try {
+      console.log(`Attempting to call ${API_BASE}${endpoint}`);
+      console.log('Payload:', payload);
+      
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      console.log('Response status:', response.status);
+      console.log('Response headers:', response.headers);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}, statusText: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      console.log('Response data:', data);
+      return data;
+    } catch (error) {
+      console.error(`Backend API Error (${endpoint}):`, error);
+      
+      if (error instanceof TypeError && error.message.includes('NetworkError')) {
+        console.error('Network error - backend server may not be running on localhost:8000');
+      }
+      
+      throw error;
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -88,20 +125,44 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
         timestamp: new Date().toISOString()
       };
 
-      // For demo purposes, simulate backend response based on enhanced risk calculation
-      const finalRiskScore = calculateEnhancedRiskScore(typingMetrics, deviceInfo, locationInfo);
-      
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      let result;
 
-      const result = {
-        success: true,
-        needs_otp: finalRiskScore > 0.4, // Lower threshold with enhanced detection
-        risk_score: finalRiskScore,
-        message: finalRiskScore < 0.3 ? 'Low risk - secure login' : 
-                finalRiskScore < 0.6 ? 'Medium risk - additional verification' :
-                'High risk - OTP required'
-      };
+      if (mockMode) {
+        // Mock mode for testing
+        console.log('Using mock mode for authentication');
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API delay
+        
+        const finalRiskScore = calculateEnhancedRiskScore(typingMetrics, deviceInfo, locationInfo);
+        
+        // Simulate different scenarios based on email
+        if (email.includes('high-risk')) {
+          result = {
+            success: true,
+            needs_otp: true,
+            risk_score: 0.8,
+            message: 'High risk detected - OTP required'
+          };
+        } else if (email.includes('medium-risk')) {
+          result = {
+            success: true,
+            needs_otp: true,
+            risk_score: 0.5,
+            message: 'Medium risk - additional verification'
+          };
+        } else {
+          result = {
+            success: true,
+            needs_otp: finalRiskScore > 0.4,
+            risk_score: finalRiskScore,
+            message: finalRiskScore < 0.3 ? 'Low risk - secure login' : 
+                    finalRiskScore < 0.6 ? 'Medium risk - additional verification' :
+                    'High risk - OTP required'
+          };
+        }
+      } else {
+        // Real backend call
+        result = await callBackendAPI('/analyze', enhancedPayload);
+      }
 
       if (result.success) {
         if (result.needs_otp) {
@@ -133,7 +194,12 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
       }
     } catch (error) {
       console.error('Login error:', error);
-      toast.error('Authentication failed. Please try again.');
+      
+      if (mockMode) {
+        toast.error('Mock authentication failed. Please try again.');
+      } else {
+        toast.error('Backend connection failed. Check if the server is running on localhost:8000');
+      }
     } finally {
       setIsAnalyzing(false);
     }
@@ -148,6 +214,26 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
           transition={{ duration: 0.6 }}
           className="w-full max-w-md"
         >
+          {/* Mock Mode Toggle */}
+          <div className="flex items-center justify-between mb-6 p-3 bg-slate-800/30 rounded-lg border border-slate-700">
+            <div className="flex items-center space-x-2">
+              <Settings className="w-4 h-4 text-blue-400" />
+              <span className="text-sm text-slate-300">Mock Mode</span>
+            </div>
+            <button
+              onClick={() => setMockMode(!mockMode)}
+              className={`relative w-11 h-6 rounded-full transition-colors ${
+                mockMode ? 'bg-blue-600' : 'bg-slate-600'
+              }`}
+            >
+              <div
+                className={`absolute top-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
+                  mockMode ? 'translate-x-5' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+
           <div className="text-center mb-8">
             <motion.div
               initial={{ scale: 0 }}
@@ -159,6 +245,11 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
             </motion.div>
             <h1 className="text-3xl font-bold text-white mb-2">Enhanced Banking Security</h1>
             <p className="text-slate-400">Advanced Behavioral Authentication</p>
+            {mockMode && (
+              <p className="text-yellow-400 text-sm mt-2">
+                Demo Mode: Try "high-risk@test.com" or "medium-risk@test.com"
+              </p>
+            )}
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -252,6 +343,9 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
           <div className="mt-6 text-center">
             <p className="text-slate-400 text-sm">
               Protected by advanced AI-powered behavioral biometrics
+            </p>
+            <p className="text-slate-500 text-xs mt-1">
+              {mockMode ? 'Running in demo mode' : 'Connected to backend server'}
             </p>
           </div>
         </motion.div>
