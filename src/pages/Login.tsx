@@ -1,12 +1,15 @@
 
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Mail, User, Shield, Brain, MapPin, Settings } from 'lucide-react';
+import { Mail, User, Shield, Brain, MapPin, Settings, AlertTriangle } from 'lucide-react';
 import AuthCard from '../components/AuthCard';
 import EnhancedTypingCapture from '../components/EnhancedTypingCapture';
 import RiskMeter from '../components/RiskMeter';
 import DeviceFingerprint from '../components/DeviceFingerprint';
+import SecurityAlert from '../components/SecurityAlert';
+import PasswordlessAuth from '../components/PasswordlessAuth';
 import { toast } from 'sonner';
+import { AdvancedFraudDetection } from '../services/simSwapDetection';
 
 interface LoginProps {
   authState: any;
@@ -16,44 +19,116 @@ interface LoginProps {
 const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [typingData, setTypingData] = useState<any[]>([]);
   const [typingMetrics, setTypingMetrics] = useState<any>(null);
   const [deviceInfo, setDeviceInfo] = useState<any>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [locationInfo, setLocationInfo] = useState<any>(null);
   const [realTimeRisk, setRealTimeRisk] = useState(0);
-  const [mockMode, setMockMode] = useState(true); // Default to mock mode for testing
+  const [mockMode, setMockMode] = useState(true);
+  const [securityAlerts, setSecurityAlerts] = useState<any[]>([]);
+  const [simSwapResult, setSimSwapResult] = useState<any>(null);
+  const [locationRisk, setLocationRisk] = useState<any>(null);
+  const [showPasswordless, setShowPasswordless] = useState(false);
+  
+  const fraudDetection = AdvancedFraudDetection.getInstance();
 
-  // Get user location for geolocation risk assessment
+  // Get user location and perform advanced checks
   React.useEffect(() => {
-    // Simulate location detection (in real app, use IP geolocation API)
-    setLocationInfo({
-      city: 'San Francisco',
-      state: 'CA',
-      country: 'US',
-      ip: '192.168.1.1' // Mock IP
-    });
-  }, []);
+    const performLocationCheck = async () => {
+      const mockLocation = {
+        city: 'San Francisco',
+        state: 'CA',
+        country: 'US',
+        ip: email.includes('high-risk') ? 'high-risk-ip' : 
+            email.includes('medium-risk') ? 'medium-risk-ip' : '192.168.1.1'
+      };
+      setLocationInfo(mockLocation);
 
-  const calculateEnhancedRiskScore = (metrics: any, device: any, location: any) => {
+      // Check location risk
+      try {
+        const registeredLocation = { city: 'New York', country: 'US', coordinates: [40.7128, -74.0060] };
+        const locationRiskResult = await fraudDetection.checkLocationRisk(mockLocation.ip, registeredLocation, mockMode);
+        setLocationRisk(locationRiskResult);
+
+        if (locationRiskResult.locationMismatch) {
+          setSecurityAlerts(prev => [...prev, {
+            id: Date.now() + Math.random(),
+            type: 'location_risk',
+            severity: locationRiskResult.riskScore > 0.7 ? 'high' : 'medium',
+            message: `Login attempt from unusual location: ${locationRiskResult.currentLocation.city}, ${locationRiskResult.currentLocation.country}`,
+            details: {
+              distance: `${Math.round(locationRiskResult.distance)} km`,
+              risk_score: locationRiskResult.riskScore.toFixed(3)
+            }
+          }]);
+        }
+      } catch (error) {
+        console.error('Location check failed:', error);
+      }
+    };
+
+    if (email) {
+      performLocationCheck();
+    }
+  }, [email, mockMode]);
+
+  // Perform SIM swap detection when phone number is entered
+  React.useEffect(() => {
+    const checkSIMSwap = async () => {
+      if (phoneNumber) {
+        try {
+          const result = await fraudDetection.detectSIMSwap(phoneNumber, mockMode);
+          setSimSwapResult(result);
+
+          if (result.isSwapped) {
+            setSecurityAlerts(prev => [...prev, {
+              id: Date.now() + Math.random(),
+              type: 'sim_swap',
+              severity: result.riskLevel,
+              message: `SIM swap detected! Confidence: ${(result.confidence * 100).toFixed(1)}%`,
+              details: {
+                swap_date: result.swapDate,
+                confidence: (result.confidence * 100).toFixed(1) + '%',
+                risk_level: result.riskLevel
+              }
+            }]);
+          }
+        } catch (error) {
+          console.error('SIM swap detection failed:', error);
+        }
+      }
+    };
+
+    checkSIMSwap();
+  }, [phoneNumber, mockMode]);
+
+  const calculateEnhancedRiskScore = (metrics: any, device: any, location: any, simSwap: any, locationRisk: any) => {
     let riskScore = 0;
 
-    // Typing behavior analysis (40% weight)
-    if (metrics.typing_speed_wpm < 20 || metrics.typing_speed_wpm > 100) riskScore += 0.15;
-    if (metrics.error_rate > 0.1) riskScore += 0.1;
-    if (metrics.rhythm_consistency < 0.5) riskScore += 0.1;
-    if (metrics.avg_dwell_time < 50 || metrics.avg_dwell_time > 300) riskScore += 0.05;
+    // Behavioral analysis (30% weight)
+    if (metrics?.typing_speed_wpm < 20 || metrics?.typing_speed_wpm > 100) riskScore += 0.1;
+    if (metrics?.error_rate > 0.1) riskScore += 0.08;
+    if (metrics?.rhythm_consistency < 0.5) riskScore += 0.07;
+    if (metrics?.avg_dwell_time < 50 || metrics?.avg_dwell_time > 300) riskScore += 0.05;
 
-    // Device fingerprint analysis (30% weight)
-    if (device?.deviceType !== 'desktop') riskScore += 0.1; // Higher risk for mobile
-    
-    // Location analysis (20% weight)
-    // In real implementation, compare with registered location
-    if (location?.country !== 'US') riskScore += 0.15;
+    // SIM swap detection (25% weight)
+    if (simSwap?.isSwapped) {
+      riskScore += simSwap.confidence * 0.25;
+    }
 
-    // Time-based analysis (10% weight)
+    // Location analysis (25% weight)
+    if (locationRisk?.locationMismatch) {
+      riskScore += locationRisk.riskScore * 0.25;
+    }
+
+    // Device analysis (15% weight)
+    if (device?.deviceType !== 'desktop') riskScore += 0.08;
+
+    // Time-based analysis (5% weight)
     const hour = new Date().getHours();
-    if (hour < 6 || hour > 22) riskScore += 0.1; // Login outside normal hours
+    if (hour < 6 || hour > 22) riskScore += 0.05;
 
     return Math.min(riskScore, 1.0);
   };
@@ -62,9 +137,27 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
     setTypingData(data);
     setTypingMetrics(metrics);
     
-    // Calculate real-time risk score
-    const risk = calculateEnhancedRiskScore(metrics, deviceInfo, locationInfo);
+    const risk = calculateEnhancedRiskScore(metrics, deviceInfo, locationInfo, simSwapResult, locationRisk);
     setRealTimeRisk(risk);
+  };
+
+  const handlePasswordlessSuccess = (method: string, data: any) => {
+    setAuthState({
+      ...authState,
+      isAuthenticated: true,
+      email,
+      username,
+      riskScore: 0.1, // Passwordless methods are inherently low risk
+      sessionData: {
+        loginTime: new Date(),
+        authMethod: `passwordless_${method}`,
+        riskScore: 0.1,
+        deviceInfo,
+        locationInfo,
+        authData: data
+      }
+    });
+    toast.success(`Passwordless authentication successful via ${method}!`);
   };
 
   const callBackendAPI = async (endpoint: string, payload: any) => {
@@ -83,7 +176,6 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
       });
 
       console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}, statusText: ${response.statusText}`);
@@ -94,11 +186,6 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
       return data;
     } catch (error) {
       console.error(`Backend API Error (${endpoint}):`, error);
-      
-      if (error instanceof TypeError && error.message.includes('NetworkError')) {
-        console.error('Network error - backend server may not be running on localhost:8000');
-      }
-      
       throw error;
     }
   };
@@ -114,40 +201,43 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
     setIsAnalyzing(true);
 
     try {
-      // Enhanced payload with new features
       const enhancedPayload = {
         email,
         username,
+        phone_number: phoneNumber,
         typing_data: typingData,
         typing_metrics: typingMetrics,
         device_info: deviceInfo,
         location_info: locationInfo,
+        sim_swap_result: simSwapResult,
+        location_risk: locationRisk,
         timestamp: new Date().toISOString()
       };
 
       let result;
 
       if (mockMode) {
-        // Mock mode for testing
         console.log('Using mock mode for authentication');
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API delay
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
-        const finalRiskScore = calculateEnhancedRiskScore(typingMetrics, deviceInfo, locationInfo);
+        const finalRiskScore = calculateEnhancedRiskScore(
+          typingMetrics, deviceInfo, locationInfo, simSwapResult, locationRisk
+        );
         
-        // Simulate different scenarios based on email
-        if (email.includes('high-risk')) {
+        // Enhanced risk scenarios
+        if (simSwapResult?.isSwapped && simSwapResult.riskLevel === 'high') {
+          result = {
+            success: false,
+            blocked: true,
+            risk_score: 0.95,
+            message: 'Authentication blocked due to SIM swap detection'
+          };
+        } else if (locationRisk?.distance > 1000) {
           result = {
             success: true,
             needs_otp: true,
             risk_score: 0.8,
-            message: 'High risk detected - OTP required'
-          };
-        } else if (email.includes('medium-risk')) {
-          result = {
-            success: true,
-            needs_otp: true,
-            risk_score: 0.5,
-            message: 'Medium risk - additional verification'
+            message: 'High location risk - additional verification required'
           };
         } else {
           result = {
@@ -160,8 +250,19 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
           };
         }
       } else {
-        // Real backend call
         result = await callBackendAPI('/analyze', enhancedPayload);
+      }
+
+      if (result.blocked) {
+        toast.error(result.message);
+        setSecurityAlerts(prev => [...prev, {
+          id: Date.now(),
+          type: 'suspicious_pattern',
+          severity: 'high',
+          message: 'Authentication blocked due to high risk factors',
+          details: { risk_score: result.risk_score }
+        }]);
+        return;
       }
 
       if (result.success) {
@@ -186,7 +287,9 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
               authMethod: 'enhanced_behavioral',
               riskScore: result.risk_score,
               deviceInfo,
-              locationInfo
+              locationInfo,
+              simSwapResult,
+              locationRisk
             }
           });
           toast.success(`Welcome! Enhanced security confirmed. Risk: ${result.risk_score.toFixed(3)}`);
@@ -194,16 +297,28 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
       }
     } catch (error) {
       console.error('Login error:', error);
-      
-      if (mockMode) {
-        toast.error('Mock authentication failed. Please try again.');
-      } else {
-        toast.error('Backend connection failed. Check if the server is running on localhost:8000');
-      }
+      toast.error(mockMode ? 'Mock authentication failed' : 'Backend connection failed');
     } finally {
       setIsAnalyzing(false);
     }
   };
+
+  const dismissAlert = (alertId: number) => {
+    setSecurityAlerts(prev => prev.filter(alert => alert.id !== alertId));
+  };
+
+  if (showPasswordless) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <AuthCard>
+          <PasswordlessAuth 
+            onSuccess={handlePasswordlessSuccess}
+            onFallback={() => setShowPasswordless(false)}
+          />
+        </AuthCard>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
@@ -234,6 +349,18 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
             </button>
           </div>
 
+          {/* Security Alerts */}
+          {securityAlerts.map((alert) => (
+            <SecurityAlert
+              key={alert.id}
+              type={alert.type}
+              severity={alert.severity}
+              message={alert.message}
+              details={alert.details}
+              onDismiss={() => dismissAlert(alert.id)}
+            />
+          ))}
+
           <div className="text-center mb-8">
             <motion.div
               initial={{ scale: 0 }}
@@ -243,13 +370,23 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
             >
               <Shield className="w-8 h-8 text-white" />
             </motion.div>
-            <h1 className="text-3xl font-bold text-white mb-2">Enhanced Banking Security</h1>
-            <p className="text-slate-400">Advanced Behavioral Authentication</p>
+            <h1 className="text-3xl font-bold text-white mb-2">Advanced Banking Security</h1>
+            <p className="text-slate-400">Multi-Factor Fraud Detection System</p>
             {mockMode && (
               <p className="text-yellow-400 text-sm mt-2">
-                Demo Mode: Try "high-risk@test.com" or "medium-risk@test.com"
+                Demo Mode: Try "high-risk@test.com" with phone "+1high-risk"
               </p>
             )}
+          </div>
+
+          {/* Passwordless Option */}
+          <div className="mb-6 text-center">
+            <button
+              onClick={() => setShowPasswordless(true)}
+              className="text-blue-400 hover:text-blue-300 underline text-sm"
+            >
+              Try Passwordless Authentication →
+            </button>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -277,13 +414,23 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
                   required
                 />
               </div>
+
+              <div className="relative">
+                <input
+                  type="tel"
+                  placeholder="Phone Number (for SIM detection)"
+                  value={phoneNumber}
+                  onChange={(e) => setPhoneNumber(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-lg text-white placeholder-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all duration-200"
+                />
+              </div>
             </div>
 
             {/* Enhanced Behavioral Verification */}
             <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700">
               <div className="flex items-center mb-3">
                 <Brain className="w-5 h-5 text-blue-400 mr-2" />
-                <h3 className="text-white font-medium">Enhanced Behavioral Analysis</h3>
+                <h3 className="text-white font-medium">Advanced Behavioral Analysis</h3>
               </div>
               <EnhancedTypingCapture onTypingData={handleEnhancedTypingData} />
             </div>
@@ -305,15 +452,23 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
                     <MapPin className="w-5 h-5 text-green-400 mr-2" />
                     <h3 className="text-white font-medium">Location Verification</h3>
                   </div>
-                  <div className="text-sm">
+                  <div className="text-sm space-y-1">
                     <div className="flex justify-between">
-                      <span className="text-slate-400">Location:</span>
+                      <span className="text-slate-400">Current:</span>
                       <span className="text-white">{locationInfo.city}, {locationInfo.state}</span>
                     </div>
-                    <div className="flex justify-between mt-1">
-                      <span className="text-slate-400">Status:</span>
-                      <span className="text-green-400">Verified</span>
-                    </div>
+                    {locationRisk && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Risk Level:</span>
+                        <span className={`${
+                          locationRisk.riskScore < 0.3 ? 'text-green-400' :
+                          locationRisk.riskScore < 0.6 ? 'text-yellow-400' : 'text-red-400'
+                        }`}>
+                          {locationRisk.riskScore < 0.3 ? 'Low' :
+                           locationRisk.riskScore < 0.6 ? 'Medium' : 'High'}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -329,12 +484,12 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
               {isAnalyzing ? (
                 <>
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  <span>Analyzing Enhanced Patterns...</span>
+                  <span>Analyzing Security Patterns...</span>
                 </>
               ) : (
                 <>
                   <Shield className="w-5 h-5" />
-                  <span>Enhanced Secure Login</span>
+                  <span>Advanced Secure Login</span>
                 </>
               )}
             </motion.button>
@@ -342,7 +497,7 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
 
           <div className="mt-6 text-center">
             <p className="text-slate-400 text-sm">
-              Protected by advanced AI-powered behavioral biometrics
+              Protected by AI-powered fraud detection with SIM swap & location analysis
             </p>
             <p className="text-slate-500 text-xs mt-1">
               {mockMode ? 'Running in demo mode' : 'Connected to backend server'}
