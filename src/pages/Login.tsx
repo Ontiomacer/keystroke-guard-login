@@ -11,6 +11,8 @@ import { toast } from 'sonner';
 import { AdvancedFraudDetection } from '../services/simSwapDetection';
 import { LocationTrackingService } from '../services/locationTracking';
 import LocationTracker from '../components/LocationTracker';
+import PhoneVerification from '../components/PhoneVerification';
+import { IndianPhoneVerificationService, PhoneVerificationResult } from '../services/phoneVerification';
 
 interface LoginProps {
   authState: any;
@@ -34,8 +36,10 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
   const [showPasswordless, setShowPasswordless] = useState(false);
   const [locationRiskScore, setLocationRiskScore] = useState(0);
   const [showLocationConsent, setShowLocationConsent] = useState(false);
+  const [phoneVerificationResult, setPhoneVerificationResult] = useState<PhoneVerificationResult | null>(null);
   
   const fraudDetection = AdvancedFraudDetection.getInstance();
+  const phoneVerificationService = IndianPhoneVerificationService.getInstance();
 
   // Get user location and perform advanced checks
   React.useEffect(() => {
@@ -125,34 +129,66 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
     }
   };
 
-  const calculateEnhancedRiskScore = (metrics: any, device: any, location: any, simSwap: any, locationRisk: any) => {
+  const handlePhoneVerificationComplete = (result: PhoneVerificationResult) => {
+    setPhoneVerificationResult(result);
+    
+    // Add phone-based security alerts
+    if (result.riskLevel === 'high') {
+      setSecurityAlerts(prev => [...prev, {
+        id: Date.now() + Math.random(),
+        type: 'suspicious_pattern',
+        severity: 'high',
+        message: `High-risk phone number detected: ${result.carrier}`,
+        details: {
+          carrier: result.carrier,
+          is_voip: result.isVoIP,
+          is_ported: result.isPorted,
+          risk_factors: result.riskFactors.join(', ')
+        }
+      }]);
+    } else if (result.riskLevel === 'medium') {
+      setSecurityAlerts(prev => [...prev, {
+        id: Date.now() + Math.random(),
+        type: 'suspicious_pattern',
+        severity: 'medium',
+        message: `Medium-risk phone detected: ${result.riskFactors.join(', ')}`,
+        details: {
+          carrier: result.carrier,
+          risk_score: result.riskScore.toFixed(3)
+        }
+      }]);
+    }
+  };
+
+  const calculateEnhancedRiskScore = (metrics: any, device: any, location: any, simSwap: any, locationRisk: any, phoneVerification: PhoneVerificationResult | null) => {
     let riskScore = 0;
 
-    // Behavioral analysis (25% weight)
-    if (metrics?.typing_speed_wpm < 20 || metrics?.typing_speed_wpm > 100) riskScore += 0.08;
-    if (metrics?.error_rate > 0.1) riskScore += 0.06;
-    if (metrics?.rhythm_consistency < 0.5) riskScore += 0.06;
-    if (metrics?.avg_dwell_time < 50 || metrics?.avg_dwell_time > 300) riskScore += 0.05;
+    // Behavioral analysis (20% weight)
+    if (metrics?.typing_speed_wpm < 20 || metrics?.typing_speed_wpm > 100) riskScore += 0.06;
+    if (metrics?.error_rate > 0.1) riskScore += 0.05;
+    if (metrics?.rhythm_consistency < 0.5) riskScore += 0.05;
+    if (metrics?.avg_dwell_time < 50 || metrics?.avg_dwell_time > 300) riskScore += 0.04;
 
-    // SIM swap detection (25% weight)
-    if (simSwap?.isSwapped) {
-      riskScore += simSwap.confidence * 0.25;
+    // Phone verification (25% weight) - NEW
+    if (phoneVerification) {
+      riskScore += phoneVerification.riskScore * 0.25;
     }
 
-    // Location analysis (30% weight) - Enhanced
+    // SIM swap detection (20% weight)
+    if (simSwap?.isSwapped) {
+      riskScore += simSwap.confidence * 0.20;
+    }
+
+    // Location analysis (25% weight)
     if (locationRisk?.locationMismatch) {
-      riskScore += locationRisk.riskScore * 0.25;
+      riskScore += locationRisk.riskScore * 0.20;
     }
     
-    // Add geo-tracking risk score (additional 5% weight)
+    // Add geo-tracking risk score (5% weight)
     riskScore += locationRiskScore * 0.05;
 
-    // Device analysis (15% weight)
-    if (device?.deviceType !== 'desktop') riskScore += 0.08;
-
-    // Time-based analysis (5% weight)
-    const hour = new Date().getHours();
-    if (hour < 6 || hour > 22) riskScore += 0.05;
+    // Device analysis (5% weight)
+    if (device?.deviceType !== 'desktop') riskScore += 0.05;
 
     return Math.min(riskScore, 1.0);
   };
@@ -161,7 +197,7 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
     setTypingData(data);
     setTypingMetrics(metrics);
     
-    const risk = calculateEnhancedRiskScore(metrics, deviceInfo, locationInfo, simSwapResult, locationRisk);
+    const risk = calculateEnhancedRiskScore(metrics, deviceInfo, locationInfo, simSwapResult, locationRisk, phoneVerificationResult);
     setRealTimeRisk(risk);
   };
 
@@ -236,6 +272,7 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
         sim_swap_result: simSwapResult,
         location_risk: locationRisk,
         geo_risk_score: locationRiskScore,
+        phone_verification: phoneVerificationResult,
         timestamp: new Date().toISOString()
       };
 
@@ -246,23 +283,23 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
         await new Promise(resolve => setTimeout(resolve, 2000));
         
         const finalRiskScore = calculateEnhancedRiskScore(
-          typingMetrics, deviceInfo, locationInfo, simSwapResult, locationRisk
+          typingMetrics, deviceInfo, locationInfo, simSwapResult, locationRisk, phoneVerificationResult
         );
         
-        // Enhanced risk scenarios including location
-        if (simSwapResult?.isSwapped && simSwapResult.riskLevel === 'high') {
+        // Enhanced risk scenarios including phone verification
+        if (phoneVerificationResult?.riskLevel === 'high' || (simSwapResult?.isSwapped && simSwapResult.riskLevel === 'high')) {
           result = {
             success: false,
             blocked: true,
             risk_score: 0.95,
-            message: 'Authentication blocked due to SIM swap detection'
+            message: 'Authentication blocked due to high-risk phone or SIM swap detection'
           };
-        } else if (locationRiskScore > 0.8 || locationRisk?.distance > 1000) {
+        } else if (locationRiskScore > 0.8 || locationRisk?.distance > 1000 || phoneVerificationResult?.riskLevel === 'medium') {
           result = {
             success: true,
             needs_otp: true,
             risk_score: Math.max(0.8, finalRiskScore),
-            message: 'High location risk - additional verification required'
+            message: 'High risk detected - additional verification required'
           };
         } else {
           result = {
@@ -399,7 +436,7 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
             <p className="text-slate-400">Multi-Factor Fraud Detection System</p>
             {mockMode && (
               <p className="text-yellow-400 text-sm mt-2">
-                Demo Mode: Try "high-risk@test.com" with phone "+1high-risk"
+                Demo Mode: Try phone numbers ending with 999 (high-risk), 888 (medium-risk), or 777 (safe)
               </p>
             )}
           </div>
@@ -443,13 +480,22 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
               <div className="relative">
                 <input
                   type="tel"
-                  placeholder="Phone Number (for SIM detection)"
+                  placeholder="Phone Number (for verification & SIM detection)"
                   value={phoneNumber}
                   onChange={(e) => setPhoneNumber(e.target.value)}
                   className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-lg text-white placeholder-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all duration-200"
                 />
               </div>
             </div>
+
+            {/* Phone Verification Component */}
+            {phoneNumber && (
+              <PhoneVerification
+                phoneNumber={phoneNumber}
+                onVerificationComplete={handlePhoneVerificationComplete}
+                mockMode={mockMode}
+              />
+            )}
 
             {/* Enhanced Behavioral Verification */}
             <div className="bg-slate-800/30 rounded-lg p-4 border border-slate-700">
