@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { LogOut, Shield, Activity, AlertTriangle, CheckCircle, Clock, Settings, TrendingUp } from 'lucide-react';
@@ -22,7 +21,6 @@ const Dashboard: React.FC<DashboardProps> = ({ authState, setAuthState }) => {
   });
 
   useEffect(() => {
-    // Simulate loading dashboard data
     const mockStats = {
       totalLogins: 47,
       behavioralLogins: 42,
@@ -60,7 +58,7 @@ const Dashboard: React.FC<DashboardProps> = ({ authState, setAuthState }) => {
   const successRate = stats.totalLogins > 0 ? (stats.behavioralLogins / stats.totalLogins * 100) : 0;
 
   return (
-    <div className="min-h-screen p-4 bg-gradient-to-br from-background via-background to-muted">
+    <div className="p-6 bg-background min-h-full">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <motion.div
@@ -69,8 +67,8 @@ const Dashboard: React.FC<DashboardProps> = ({ authState, setAuthState }) => {
           className="flex items-center justify-between mb-8"
         >
           <div>
-            <h1 className="text-3xl font-bold text-foreground mb-2">Security Dashboard</h1>
-            <p className="text-muted-foreground">Welcome back, {authState.username}</p>
+            <h1 className="text-3xl font-bold text-foreground mb-2">Welcome back, {authState.username}</h1>
+            <p className="text-muted-foreground">Your security dashboard overview</p>
           </div>
           <div className="flex items-center space-x-4">
             <ThemeToggle />
