@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Mail, User, Shield, Brain, MapPin, Settings, AlertTriangle } from 'lucide-react';
@@ -10,6 +9,8 @@ import SecurityAlert from '../components/SecurityAlert';
 import PasswordlessAuth from '../components/PasswordlessAuth';
 import { toast } from 'sonner';
 import { AdvancedFraudDetection } from '../services/simSwapDetection';
+import { LocationTrackingService } from '../services/locationTracking';
+import LocationTracker from '../components/LocationTracker';
 
 interface LoginProps {
   authState: any;
@@ -31,6 +32,8 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
   const [simSwapResult, setSimSwapResult] = useState<any>(null);
   const [locationRisk, setLocationRisk] = useState<any>(null);
   const [showPasswordless, setShowPasswordless] = useState(false);
+  const [locationRiskScore, setLocationRiskScore] = useState(0);
+  const [showLocationConsent, setShowLocationConsent] = useState(false);
   
   const fraudDetection = AdvancedFraudDetection.getInstance();
 
@@ -104,13 +107,31 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
     checkSIMSwap();
   }, [phoneNumber, mockMode]);
 
+  const handleLocationLogged = (data: { riskScore: number; fraudFlags: string[] }) => {
+    setLocationRiskScore(data.riskScore);
+    
+    // Add location-based security alerts
+    if (data.riskScore > 0.7) {
+      setSecurityAlerts(prev => [...prev, {
+        id: Date.now() + Math.random(),
+        type: 'location_risk',
+        severity: 'high',
+        message: `High-risk location detected! Risk score: ${(data.riskScore * 100).toFixed(0)}%`,
+        details: {
+          risk_score: data.riskScore.toFixed(3),
+          fraud_flags: data.fraudFlags.join(', ')
+        }
+      }]);
+    }
+  };
+
   const calculateEnhancedRiskScore = (metrics: any, device: any, location: any, simSwap: any, locationRisk: any) => {
     let riskScore = 0;
 
-    // Behavioral analysis (30% weight)
-    if (metrics?.typing_speed_wpm < 20 || metrics?.typing_speed_wpm > 100) riskScore += 0.1;
-    if (metrics?.error_rate > 0.1) riskScore += 0.08;
-    if (metrics?.rhythm_consistency < 0.5) riskScore += 0.07;
+    // Behavioral analysis (25% weight)
+    if (metrics?.typing_speed_wpm < 20 || metrics?.typing_speed_wpm > 100) riskScore += 0.08;
+    if (metrics?.error_rate > 0.1) riskScore += 0.06;
+    if (metrics?.rhythm_consistency < 0.5) riskScore += 0.06;
     if (metrics?.avg_dwell_time < 50 || metrics?.avg_dwell_time > 300) riskScore += 0.05;
 
     // SIM swap detection (25% weight)
@@ -118,10 +139,13 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
       riskScore += simSwap.confidence * 0.25;
     }
 
-    // Location analysis (25% weight)
+    // Location analysis (30% weight) - Enhanced
     if (locationRisk?.locationMismatch) {
       riskScore += locationRisk.riskScore * 0.25;
     }
+    
+    // Add geo-tracking risk score (additional 5% weight)
+    riskScore += locationRiskScore * 0.05;
 
     // Device analysis (15% weight)
     if (device?.deviceType !== 'desktop') riskScore += 0.08;
@@ -211,6 +235,7 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
         location_info: locationInfo,
         sim_swap_result: simSwapResult,
         location_risk: locationRisk,
+        geo_risk_score: locationRiskScore,
         timestamp: new Date().toISOString()
       };
 
@@ -224,7 +249,7 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
           typingMetrics, deviceInfo, locationInfo, simSwapResult, locationRisk
         );
         
-        // Enhanced risk scenarios
+        // Enhanced risk scenarios including location
         if (simSwapResult?.isSwapped && simSwapResult.riskLevel === 'high') {
           result = {
             success: false,
@@ -232,11 +257,11 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
             risk_score: 0.95,
             message: 'Authentication blocked due to SIM swap detection'
           };
-        } else if (locationRisk?.distance > 1000) {
+        } else if (locationRiskScore > 0.8 || locationRisk?.distance > 1000) {
           result = {
             success: true,
             needs_otp: true,
-            risk_score: 0.8,
+            risk_score: Math.max(0.8, finalRiskScore),
             message: 'High location risk - additional verification required'
           };
         } else {
@@ -434,6 +459,16 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
               </div>
               <EnhancedTypingCapture onTypingData={handleEnhancedTypingData} />
             </div>
+
+            {/* Location Tracking Component */}
+            {phoneNumber && deviceInfo && (
+              <LocationTracker
+                phoneNumber={phoneNumber}
+                deviceFingerprint={deviceInfo?.fingerprint || 'unknown'}
+                sessionToken="demo-session-token"
+                onLocationLogged={handleLocationLogged}
+              />
+            )}
 
             {/* Real-time Risk Assessment */}
             {realTimeRisk > 0 && (
