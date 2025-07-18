@@ -1,4 +1,3 @@
-
 export interface TwilioLookupResult {
   valid: boolean;
   carrier?: {
