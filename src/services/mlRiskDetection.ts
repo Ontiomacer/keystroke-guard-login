@@ -1,4 +1,3 @@
-
 export interface PhoneMetadata {
   phoneNumber: string;
   carrier: string;
@@ -67,8 +66,8 @@ export class MLRiskDetectionService {
 
   private constructor() {
     // In production, these would come from Supabase secrets
-    this.baseUrl = process.env.VITE_ML_API_URL || 'http://localhost:8000';
-    this.apiKey = process.env.VITE_ML_API_KEY || 'demo-key';
+    this.baseUrl = import.meta.env.VITE_ML_API_URL || 'http://localhost:8000';
+    this.apiKey = import.meta.env.VITE_ML_API_KEY || 'demo-key';
   }
 
   static getInstance(): MLRiskDetectionService {
