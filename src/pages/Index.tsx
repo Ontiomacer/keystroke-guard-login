@@ -7,6 +7,7 @@ import OTPVerify from './OTPVerify';
 import Dashboard from './Dashboard';
 import GeolocationDashboard from '../components/GeolocationDashboard';
 import AdminDashboard from '../components/AdminDashboard';
+import MLAdminDashboard from '../components/MLAdminDashboard';
 
 const Index = () => {
   const [authState, setAuthState] = useState({
@@ -72,6 +73,10 @@ const Index = () => {
               <Route 
                 path="/admin" 
                 element={<AdminDashboard />} 
+              />
+              <Route 
+                path="/ml-admin" 
+                element={<MLAdminDashboard />} 
               />
               <Route 
                 path="/security" 
