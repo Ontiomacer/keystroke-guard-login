@@ -1,4 +1,3 @@
-
 export interface IPGeolocationData {
   ip: string;
   country: string;
@@ -24,7 +23,7 @@ export class IPGeolocationService {
 
   private constructor() {
     // In production, this would come from Supabase secrets
-    this.apiKey = process.env.VITE_IPINFO_API_KEY || 'demo-key';
+    this.apiKey = import.meta.env.VITE_IPINFO_API_KEY || 'demo-key';
   }
 
   static getInstance(): IPGeolocationService {
