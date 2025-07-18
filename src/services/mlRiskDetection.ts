@@ -63,8 +63,13 @@ export class MLRiskDetectionService {
   private static instance: MLRiskDetectionService;
   private baseUrl: string;
   private apiKey: string;
+  private isProduction: boolean;
 
   private constructor() {
+    // Check if we're in a production environment
+    this.isProduction = window.location.hostname !== 'localhost' && 
+                       !window.location.hostname.includes('preview');
+    
     // In production, these would come from Supabase secrets
     this.baseUrl = import.meta.env.VITE_ML_API_URL || 'http://localhost:8000';
     this.apiKey = import.meta.env.VITE_ML_API_KEY || 'demo-key';
@@ -83,7 +88,8 @@ export class MLRiskDetectionService {
     deviceFingerprint: any,
     mockMode: boolean = true
   ): Promise<MLModelResponse> {
-    if (mockMode) {
+    // Always use mock mode in production or when localhost is not available
+    if (mockMode || this.isProduction) {
       return this.mockMLPrediction(phoneMetadata, locationMetadata, deviceFingerprint);
     }
 
@@ -293,12 +299,28 @@ export class MLRiskDetectionService {
     };
   }
 
-  // Admin dashboard methods
+  // Admin dashboard methods with improved error handling
   async getModelMetrics(): Promise<any> {
+    // Always return mock data in production or when API is not available
+    if (this.isProduction) {
+      return this.mockModelMetrics();
+    }
+
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
       const response = await fetch(`${this.baseUrl}/api/v1/model/metrics`, {
-        headers: { 'Authorization': `Bearer ${this.apiKey}` }
+        headers: { 'Authorization': `Bearer ${this.apiKey}` },
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
       return await response.json();
     } catch (error) {
       console.error('Failed to fetch model metrics:', error);
