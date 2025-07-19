@@ -95,6 +95,9 @@ const Login: React.FC<LoginProps> = ({ authState, setAuthState }) => {
             phoneMetadata,
             locationMetadata,
             deviceInfo,
+            5000, // transactionAmount
+            { customer_age: 35, customer_location: 'Mumbai, India', credit_limit: 50000, average_monthly_spending: 15000 }, // userProfile
+            'Login', // merchant
             mockMode
           );
           

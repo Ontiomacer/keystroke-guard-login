@@ -20,21 +20,40 @@ interface TwilioLookupResponse {
   }
 }
 
-interface HuggingFaceRequest {
-  inputs: {
-    phone_type: string
-    carrier_risk: number
-    is_ported: number
-    location_mismatch: number
-    device_anomaly: number
-    transaction_amount?: number
-    time_of_day: number
+interface FraudDetectionRequest {
+  model: string
+  prompt: {
+    transaction_id: string
+    amount: number
+    timestamp: string
+    location: string
+    merchant: string
+    device_type: string
+    gps_coordinates: { lat: number; lng: number }
+    user_profile: {
+      customer_age: number
+      customer_location: string
+      credit_limit: number
+      average_monthly_spending: number
+    }
+    flags: {
+      unusual_time?: boolean
+      rooted_device?: boolean
+      location_mismatch?: boolean
+      high_amount?: boolean
+      unusual_location?: boolean
+    }
   }
 }
 
-interface HuggingFaceResponse {
-  label: string
-  score: number
+interface FraudDetectionResponse {
+  result: "FRAUD" | "NOT_FRAUD"
+  reason: string
+  confidence_score: number
+  location_coordinates: {
+    lat: number
+    lon: number
+  }
 }
 
 serve(async (req) => {
@@ -44,7 +63,14 @@ serve(async (req) => {
   }
 
   try {
-    const { phoneNumber, locationData, deviceData, transactionAmount } = await req.json()
+    const { 
+      phoneNumber, 
+      locationData, 
+      deviceData, 
+      transactionAmount = 5000,
+      userProfile = {},
+      merchant = "General"
+    } = await req.json()
 
     if (!phoneNumber) {
       return new Response(
@@ -106,15 +132,18 @@ serve(async (req) => {
 
     console.log('Twilio lookup result:', twilioData)
 
-    // Step 2: Extract features for ML model
-    const features = extractFeatures(twilioData, locationData, deviceData, transactionAmount)
-    console.log('Extracted features:', features)
+    // Step 2: Prepare fraud detection request
+    const fraudRequest = createFraudDetectionRequest(
+      twilioData, 
+      locationData, 
+      deviceData, 
+      transactionAmount,
+      userProfile,
+      merchant
+    )
+    console.log('Fraud detection request:', fraudRequest)
 
-    // Step 3: Call Hugging Face Inference API
-    const hfRequest: HuggingFaceRequest = {
-      inputs: features
-    }
-
+    // Step 3: Call Hugging Face Inference API for fraud detection
     const hfResponse = await fetch(
       'https://api-inference.huggingface.co/models/ModSpecialization/mistral-7b-bnb-4bit-synthetic-creditcard-fraud-detection',
       {
@@ -123,39 +152,38 @@ serve(async (req) => {
           'Authorization': `Bearer ${huggingFaceToken}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(hfRequest)
+        body: JSON.stringify(fraudRequest)
       }
     )
 
     let riskScore = 0.5 // Default medium risk
     let riskLevel = 'medium'
     let confidence = 0.7
+    let reason = 'Standard risk assessment completed'
 
     if (hfResponse.ok) {
-      const hfData: HuggingFaceResponse[] = await hfResponse.json()
+      const hfData: FraudDetectionResponse = await hfResponse.json()
       console.log('Hugging Face response:', hfData)
       
-      // Process HF response - assuming it returns classification scores
-      if (Array.isArray(hfData) && hfData.length > 0) {
-        const fraudResult = hfData.find(result => 
-          result.label?.toLowerCase().includes('fraud') || 
-          result.label?.toLowerCase().includes('high_risk')
-        )
-        
-        if (fraudResult) {
-          riskScore = fraudResult.score
-          confidence = Math.max(0.6, fraudResult.score)
-        } else if (hfData[0]) {
-          // Use first result if no fraud label found
-          riskScore = hfData[0].score
-          confidence = Math.max(0.6, hfData[0].score)
-        }
+      // Process fraud detection response
+      if (hfData.result === 'FRAUD') {
+        riskScore = hfData.confidence_score
+        riskLevel = riskScore > 0.8 ? 'high' : 'medium'
+        reason = hfData.reason
+        confidence = hfData.confidence_score
+      } else {
+        riskScore = 1 - hfData.confidence_score
+        riskLevel = riskScore < 0.3 ? 'low' : 'medium'
+        reason = `Not fraud detected: ${hfData.reason}`
+        confidence = hfData.confidence_score
       }
     } else {
       console.error('Hugging Face API failed:', hfResponse.status, await hfResponse.text())
       
       // Fallback to rule-based risk assessment
-      riskScore = calculateFallbackRisk(features)
+      const fallbackResult = calculateFallbackRisk(fraudRequest.prompt)
+      riskScore = fallbackResult.score
+      reason = fallbackResult.reason
       confidence = 0.5
     }
 
@@ -168,18 +196,25 @@ serve(async (req) => {
       riskLevel = 'low'
     }
 
-    // Step 4: Return risk assessment
+    // Step 4: Return comprehensive risk assessment
     const result = {
       risk: {
         score: Math.round(riskScore * 100) / 100,
         level: riskLevel,
         confidence: Math.round(confidence * 100) / 100,
-        factors: generateRiskFactors(features, twilioData),
+        reason: reason,
+        factors: generateRiskFactors(fraudRequest.prompt, twilioData),
         phoneVerification: {
           valid: twilioData.valid,
           carrier: twilioData.carrier?.name || 'Unknown',
           isVoIP: twilioData.carrier?.type === 'voip',
           isPorted: twilioData.porting?.ported || false
+        },
+        transaction: {
+          amount: transactionAmount,
+          merchant: merchant,
+          location: fraudRequest.prompt.location,
+          coordinates: fraudRequest.prompt.gps_coordinates
         }
       }
     }
@@ -214,85 +249,151 @@ serve(async (req) => {
   }
 })
 
-function extractFeatures(
-  twilioData: TwilioLookupResponse, 
-  locationData?: any, 
-  deviceData?: any, 
-  transactionAmount?: number
-) {
-  const currentHour = new Date().getHours()
+function createFraudDetectionRequest(
+  twilioData: TwilioLookupResponse,
+  locationData?: any,
+  deviceData?: any,
+  transactionAmount: number = 5000,
+  userProfile: any = {},
+  merchant: string = "General"
+): FraudDetectionRequest {
+  const currentTime = new Date()
+  const currentHour = currentTime.getHours()
   
-  // Carrier risk mapping
-  const carrierRiskMap: Record<string, number> = {
-    'Unknown': 0.8,
-    'VoIP': 0.9,
-    'Jio': 0.1,
-    'Airtel': 0.15,
-    'Vodafone': 0.2,
-    'BSNL': 0.25
-  }
-
-  const carrierName = twilioData.carrier?.name || 'Unknown'
-  const carrierRisk = carrierRiskMap[carrierName] || 0.5
-
+  // Generate transaction location (use provided location or default to user location)
+  const transactionLocation = locationData?.city || userProfile.customer_location || "Mumbai, India"
+  const userLocation = userProfile.customer_location || "Mumbai, India"
+  
+  // Generate GPS coordinates (mock data for demo)
+  const coordinates = getLocationCoordinates(transactionLocation)
+  
   return {
-    phone_type: twilioData.carrier?.type || 'mobile',
-    carrier_risk: carrierRisk,
-    is_ported: twilioData.porting?.ported ? 1 : 0,
-    location_mismatch: locationData?.suspicious ? 1 : 0,
-    device_anomaly: deviceData?.suspicious ? 1 : 0,
-    transaction_amount: transactionAmount || 0,
-    time_of_day: currentHour
+    model: "fraud-mistral",
+    prompt: {
+      transaction_id: `TX${Math.floor(Math.random() * 100000)}`,
+      amount: transactionAmount,
+      timestamp: currentTime.toISOString(),
+      location: transactionLocation,
+      merchant: merchant,
+      device_type: getDeviceType(deviceData),
+      gps_coordinates: coordinates,
+      user_profile: {
+        customer_age: userProfile.customer_age || 35,
+        customer_location: userLocation,
+        credit_limit: userProfile.credit_limit || 50000,
+        average_monthly_spending: userProfile.average_monthly_spending || 15000
+      },
+      flags: {
+        unusual_time: currentHour < 6 || currentHour > 22,
+        rooted_device: deviceData?.rooted || false,
+        location_mismatch: transactionLocation !== userLocation,
+        high_amount: transactionAmount > (userProfile.credit_limit || 50000) * 0.8,
+        unusual_location: locationData?.suspicious || false
+      }
+    }
   }
 }
 
-function calculateFallbackRisk(features: any): number {
-  let risk = 0.3 // Base risk
-
-  // Phone-based risk factors
-  if (features.phone_type === 'voip') risk += 0.3
-  if (features.is_ported === 1) risk += 0.2
-  if (features.carrier_risk > 0.5) risk += 0.2
-
-  // Location and device factors
-  if (features.location_mismatch === 1) risk += 0.2
-  if (features.device_anomaly === 1) risk += 0.2
-
-  // Time-based factors (higher risk during unusual hours)
-  if (features.time_of_day < 6 || features.time_of_day > 22) risk += 0.1
-
-  return Math.min(risk, 1.0)
+function getDeviceType(deviceData?: any): string {
+  if (deviceData?.rooted) return "Rooted Android"
+  if (deviceData?.jailbroken) return "Jailbroken iOS"
+  if (deviceData?.platform) return deviceData.platform
+  return "Standard Mobile"
 }
 
-function generateRiskFactors(features: any, twilioData: TwilioLookupResponse): string[] {
+function getLocationCoordinates(location: string): { lat: number; lng: number } {
+  // Mock coordinates for common Indian cities
+  const coordinates: Record<string, { lat: number; lng: number }> = {
+    "Mumbai, India": { lat: 19.0760, lng: 72.8777 },
+    "Delhi, India": { lat: 28.6139, lng: 77.2090 },
+    "Bangalore, India": { lat: 12.9716, lng: 77.5946 },
+    "Hyderabad, India": { lat: 17.3850, lng: 78.4867 },
+    "Chennai, India": { lat: 13.0827, lng: 80.2707 },
+    "Kolkata, India": { lat: 22.5726, lng: 88.3639 },
+    "Pune, India": { lat: 18.5204, lng: 73.8567 },
+    "Patna, India": { lat: 25.5941, lng: 85.1376 }
+  }
+  
+  return coordinates[location] || { lat: 19.0760, lng: 72.8777 } // Default to Mumbai
+}
+
+function calculateFallbackRisk(prompt: any): { score: number; reason: string } {
+  let risk = 0.3 // Base risk
+  const reasons: string[] = []
+
+  // Amount-based risk
+  if (prompt.flags.high_amount) {
+    risk += 0.3
+    reasons.push(`High amount (${prompt.amount}) exceeds typical spending`)
+  }
+
+  // Location-based risk
+  if (prompt.flags.location_mismatch) {
+    risk += 0.2
+    reasons.push(`Transaction location (${prompt.location}) differs from user location (${prompt.user_profile.customer_location})`)
+  }
+
+  // Time-based risk
+  if (prompt.flags.unusual_time) {
+    risk += 0.1
+    reasons.push('Transaction at unusual time')
+  }
+
+  // Device-based risk
+  if (prompt.flags.rooted_device) {
+    risk += 0.2
+    reasons.push('Rooted/jailbroken device detected')
+  }
+
+  const finalRisk = Math.min(risk, 1.0)
+  const reason = reasons.length > 0 ? reasons.join('; ') : 'Standard risk factors evaluated'
+
+  return { score: finalRisk, reason }
+}
+
+function generateRiskFactors(prompt: any, twilioData: TwilioLookupResponse): string[] {
   const factors: string[] = []
 
-  if (features.phone_type === 'voip') {
-    factors.push('VoIP number detected')
+  // Transaction amount factors
+  if (prompt.flags.high_amount) {
+    factors.push(`High transaction amount: ₹${prompt.amount.toLocaleString()} (${Math.round((prompt.amount/prompt.user_profile.credit_limit)*100)}% of credit limit)`)
   }
 
-  if (features.is_ported === 1) {
-    factors.push('Recently ported number')
+  // Location factors
+  if (prompt.flags.location_mismatch) {
+    factors.push(`Location mismatch: Transaction in ${prompt.location}, user registered in ${prompt.user_profile.customer_location}`)
   }
 
-  if (features.carrier_risk > 0.5) {
-    factors.push('Unknown or high-risk carrier')
+  if (prompt.flags.unusual_location) {
+    factors.push('Unusual transaction location detected')
   }
 
-  if (features.location_mismatch === 1) {
-    factors.push('Location anomaly detected')
+  // Time factors
+  if (prompt.flags.unusual_time) {
+    factors.push(`Unusual transaction time: ${new Date(prompt.timestamp).toLocaleTimeString()}`)
   }
 
-  if (features.device_anomaly === 1) {
-    factors.push('Suspicious device detected')
+  // Device factors
+  if (prompt.flags.rooted_device) {
+    factors.push(`Compromised device: ${prompt.device_type}`)
   }
 
-  if (features.time_of_day < 6 || features.time_of_day > 22) {
-    factors.push('Unusual time of activity')
+  // Phone factors
+  if (twilioData.carrier?.type === 'voip') {
+    factors.push('VoIP phone number detected')
+  }
+
+  if (twilioData.porting?.ported) {
+    factors.push('Recently ported phone number')
   }
 
   if (!twilioData.valid) {
     factors.push('Invalid phone number format')
+  }
+
+  // Merchant factors
+  if (prompt.merchant === 'Jewelry' || prompt.merchant === 'Electronics') {
+    factors.push(`High-risk merchant category: ${prompt.merchant}`)
   }
 
   return factors
